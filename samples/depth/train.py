@@ -1,76 +1,128 @@
 import os, sys, glob, time, pathlib, argparse
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '5'
 
-# Kerasa / TensorFlow
-from loss import depth_loss_function
-from utils import predict, save_images, load_test_data
-from model import create_model
-from model_resnet import create_model_resnet
-from model_mobilenet import create_model_mobilenet
-from data import get_nyu_train_test_data, get_unreal_train_test_data
-from callbacks import get_nyu_callbacks
 from model import DepthMaskRCNN
 from mrcnn.config import Config
-
+from data import NyuDataset
 
 from keras.optimizers import Adam
 from keras.utils import multi_gpu_model
 from keras.utils.vis_utils import plot_model
 
+if __name__ == '__main__':
+    import argparse
 
-# Argument Parser
-parser = argparse.ArgumentParser(description='High Quality Monocular Depth Estimation via Transfer Learning')
-parser.add_argument('--data', default='nyu', type=str, help='Training dataset.')
-parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate')
-parser.add_argument('--bs', type=int, default=4, help='Batch size')
-parser.add_argument('--epochs', type=int, default=20, help='Number of epochs')
-parser.add_argument('--gpus', type=int, default=1, help='The number of GPUs to use')
-parser.add_argument('--gpuids', type=str, default='0', help='IDs of GPUs to use')
-parser.add_argument('--mindepth', type=float, default=10.0, help='Minimum of input depths')
-parser.add_argument('--maxdepth', type=float, default=1000.0, help='Maximum of input depths')
-parser.add_argument('--name', type=str, default='densedepth_nyu', help='A name to attach to the training session')
-parser.add_argument('--checkpoint', type=str, default='', help='Start training from an existing model.')
-parser.add_argument('--full', dest='full', action='store_true', help='Full training with metrics, checkpoints, and image samples.')
-parser.add_argument('--dnetVersion', type = str, default= 'medium' , help='Choice of densenet from small, medium or large.')
-parser.add_argument('--resnet50', dest='resnet50', action='store_true', help='Train a Resnet 50 model.')
-parser.add_argument('--mobilenet', dest='mobilenet', action='store_true', help='Train a MobileNetV2 model.')
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(
+        description='Train Mask R-CNN on MS COCO.')
+    parser.add_argument("command",
+                        metavar="<command>",
+                        help="'train' or 'evaluate' on MS COCO")
+    parser.add_argument('--dataset', required=True,
+                        metavar="/path/to/coco/",
+                        help='Directory of the MS-COCO dataset')
+    parser.add_argument('--year', required=False,
+                        default=DEFAULT_DATASET_YEAR,
+                        metavar="<year>",
+                        help='Year of the MS-COCO dataset (2014 or 2017) (default=2014)')
+    parser.add_argument('--model', required=True,
+                        metavar="/path/to/weights.h5",
+                        help="Path to weights .h5 file or 'coco'")
+    parser.add_argument('--logs', required=False,
+                        default=DEFAULT_LOGS_DIR,
+                        metavar="/path/to/logs/",
+                        help='Logs and checkpoints directory (default=logs/)')
+    parser.add_argument('--limit', required=False,
+                        default=500,
+                        metavar="<image count>",
+                        help='Images to use for evaluation (default=500)')
+    parser.add_argument('--download', required=False,
+                        default=False,
+                        metavar="<True|False>",
+                        help='Automatically download and unzip MS-COCO files (default=False)',
+                        type=bool)
+    args = parser.parse_args()
+    print("Command: ", args.command)
+    print("Model: ", args.model)
+    print("Dataset: ", args.dataset)
+    print("Year: ", args.year)
+    print("Logs: ", args.logs)
+    print("Auto Download: ", args.download)
 
-args = parser.parse_args()
+    # Configurations
+    if args.command == "train":
+        config = CocoConfig()
+    else:
+        class InferenceConfig(CocoConfig):
+            # Set batch size to 1 since we'll be running inference on
+            # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
+            GPU_COUNT = 1
+            IMAGES_PER_GPU = 1
+            DETECTION_MIN_CONFIDENCE = 0
+        config = InferenceConfig()
+    config.display()
 
-# Inform about multi-gpu training
-if args.gpus == 1: 
-    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpuids
-    print('Will use GPU ' + args.gpuids)
-else:
-    print('Will use ' + str(args.gpus) + ' GPUs.')
+    # Create model
+    if args.command == "train":
+        model = modellib.MaskRCNN(mode="training", config=config,
+                                  model_dir=args.logs)
+    else:
+        model = modellib.MaskRCNN(mode="inference", config=config,
+                                  model_dir=args.logs)
 
-# Data loaders
-if args.data == 'nyu': train_generator, test_generator = get_nyu_train_test_data( args.bs )
-if args.data == 'unreal': train_generator, test_generator = get_unreal_train_test_data( args.bs )
+    # Select weights file to load
+    if args.model.lower() == "coco":
+        model_path = COCO_MODEL_PATH
+    elif args.model.lower() == "last":
+        # Find last trained weights
+        model_path = model.find_last()
+    elif args.model.lower() == "imagenet":
+        # Start from ImageNet trained weights
+        model_path = model.get_imagenet_weights()
+    else:
+        model_path = args.model
 
-# Training session details
-runID = str(int(time.time())) + '-n' + str(len(train_generator)) + '-e' + str(args.epochs) + '-bs' + str(args.bs) + '-lr' + str(args.lr) + '-' + args.name
-outputPath = './models/'
-runPath = outputPath + runID
-pathlib.Path(runPath).mkdir(parents=True, exist_ok=True)
-print('Output: ' + runPath)
+    # Load weights
+    #print("Loading weights ", model_path)
+    #model.load_weights(model_path, by_name=True)
 
-model = DepthMaskRCNN(mode = 'train', config = Config,
-                      model_dir = runPath)
-model.set_trainable()
-model.compile(args.lr, Config.LEARNING_MOMENTUM)
+    # Train or evaluate
+    if args.command == "train":
+        # Training dataset. Use the training set and 35K from the
+        # validation set, as as in the Mask RCNN paper.
+        dataset_train = NyuDataset()
+        dataset_train.load_nyu(nyu, "train",)
+        dataset_train.prepare()
 
-model = model.keras_model
+        # Validation dataset
+        dataset_val = NyuDataset()
+        dataset_val.load_nyu(args.dataset, 'test')
+        dataset_val.prepare()
 
-print('Ready for training!\n')
+        # Image Augmentation
+        # Right/Left flip 50% of the time
+        augmentation = imgaug.augmenters.Fliplr(0.5)
 
-# Callbacks
-callbacks = []
-if args.data == 'nyu': callbacks = get_nyu_callbacks(model, basemodel, train_generator, test_generator, load_test_data() if args.full else None , runPath)
-if args.data == 'unreal': callbacks = get_nyu_callbacks(model, basemodel, train_generator, test_generator, load_test_data() if args.full else None , runPath)
+        # *** This training schedule is an example. Update to your needs ***
 
-# Start training
-model.fit_generator(train_generator, callbacks=callbacks, validation_data=test_generator, epochs=args.epochs, shuffle=True)
+        # Training - Stage 3
+        # Fine tune all layers
+        print("Fine tune all layers")
+        model.train(dataset_train, dataset_val,
+                    learning_rate=config.LEARNING_RATE / 10,
+                    epochs=160,
+                    layers='all',
+                    augmentation=augmentation)
 
-# Save the final trained model:
-model.save(runPath + '/model.h5')
+    elif args.command == "evaluate":
+        # Validation dataset
+        dataset_val = CocoDataset()
+        val_type = "val" if args.year in '2017' else "minival"
+        coco = dataset_val.load_coco(args.dataset, val_type, year=args.year, return_coco=True, auto_download=args.download)
+        dataset_val.prepare()
+        print("Running COCO evaluation on {} images.".format(args.limit))
+        evaluate_coco(model, dataset_val, coco, "bbox", limit=int(args.limit))
+    else:
+        print("'{}' is not recognized. "
+              "Use 'train' or 'evaluate'".format(args.command))
+
