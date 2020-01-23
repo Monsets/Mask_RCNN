@@ -24,6 +24,7 @@ import keras.engine as KE
 import keras.models as KM
 
 from mrcnn import utils
+from layers import BilinearUpSampling2D
 
 # Requires TensorFlow 1.3+ and Keras 2.0.8+.
 from distutils.version import LooseVersion
@@ -182,6 +183,7 @@ def resnet_graph(input_image, architecture, stage5=False, train_bn=True):
     x = KL.Conv2D(64, (7, 7), strides=(2, 2), name='conv1', use_bias=True)(x)
     x = BatchNorm(name='bn_conv1')(x, training=train_bn)
     x = KL.Activation('relu')(x)
+    C0 = x
     C1 = x = KL.MaxPooling2D((3, 3), strides=(2, 2), padding="same")(x)
     # Stage 2
     x = conv_block(x, 3, [64, 64, 256], stage=2, block='a', strides=(1, 1), train_bn=train_bn)
@@ -205,7 +207,7 @@ def resnet_graph(input_image, architecture, stage5=False, train_bn=True):
         C5 = x = identity_block(x, 3, [512, 512, 2048], stage=5, block='c', train_bn=train_bn)
     else:
         C5 = None
-    return [C1, C2, C3, C4, C5]
+    return [C0, C1, C2, C3, C4, C5]
 
 
 ############################################################
@@ -1213,7 +1215,7 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
     # Load image and mask
     image = dataset.load_image(image_id)
     mask, class_ids = dataset.load_mask(image_id)
-    depth_map = dataset.load_mask(image_id)
+    depth_map = dataset.load_depth_map(image_id)
     original_shape = image.shape
     image, window, scale, padding, crop = utils.resize_image(
         image,
@@ -1221,7 +1223,7 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
         min_scale=config.IMAGE_MIN_SCALE,
         max_dim=config.IMAGE_MAX_DIM,
         mode=config.IMAGE_RESIZE_MODE)
-    mask = utils.resize_mask(mask, scale, padding, crop)
+ #   mask = utils.resize_mask(mask, scale, padding, crop)
 
     # Random horizontal flips.
     # TODO: will be removed in a future update in favor of augmentation
@@ -1234,7 +1236,7 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
 
     # Augmentation
     # This requires the imgaug lib (https://github.com/aleju/imgaug)
-    if augmentation:
+    if False:
         import imgaug
 
         # Augmenters that are safe to apply to masks
@@ -1267,7 +1269,7 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
     # and here is to filter them out
     _idx = np.sum(mask, axis=(0, 1)) > 0
     mask = mask[:, :, _idx]
-    class_ids = class_ids[_idx]
+    #class_ids = class_ids[_idx]
     # Bounding boxes. Note that some boxes might be all zeros
     # if the corresponding mask got cropped out.
     # bbox: [num_instances, (y1, x1, y2, x2)]
@@ -1857,7 +1859,7 @@ class DepthMaskRCNN():
         input_image_meta = KL.Input(shape=[config.IMAGE_META_SIZE],
                                     name="input_image_meta")
         # Depht input
-        input_depth = KL.Input(shape=[None, 320, 240], name='input_depth')
+        input_depth = KL.Input(shape=[240, 320, 1], name='input_depth')
 
         if mode == "training":
             # RPN GT
@@ -1897,10 +1899,10 @@ class DepthMaskRCNN():
         # Returns a list of the last layers of each stage, 5 in total.
         # Don't create the thead (stage 5), so we pick the 4th item in the list.
         if callable(config.BACKBONE):
-            _, C2, C3, C4, C5 = config.BACKBONE(input_image, stage5=True,
+            C0, C1, C2, C3, C4, C5 = config.BACKBONE(input_image, stage5=True,
                                                 train_bn=config.TRAIN_BN)
         else:
-            _, C2, C3, C4, C5 = resnet_graph(input_image, config.BACKBONE,
+            C0, C1, C2, C3, C4, C5 = resnet_graph(input_image, config.BACKBONE,
                                              stage5=True, train_bn=config.TRAIN_BN)
         # Top-down Layers
         # TODO: add assert to varify feature map sizes match what's in config
@@ -1958,40 +1960,32 @@ class DepthMaskRCNN():
 
         # Depth network part
         # Starting point for decoder
-        base_model_output_shape = C5.output.shape
+        base_model_output_shape = C5.shape
         print(" Output shape is: ", base_model_output_shape)
-
-        # Layer freezing?
-        for layer in base_model.layers: layer.trainable = True
-
-        # Starting number of decoder filters
-        if is_halffeatures:
-            decode_filters = int(int(base_model_output_shape[-1]) / 2)
-        else:
-            decode_filters = int(base_model_output_shape[-1])
 
         # Define upsampling layer
         def upproject(tensor, filters, name, concat_with):
             up_i = BilinearUpSampling2D((2, 2), name=name + '_upsampling2d')(tensor)
-            up_i = Concatenate(name=name + '_concat')(
-                [up_i, base_model.get_layer(concat_with).output])  # Skip connection
-            up_i = Conv2D(filters=filters, kernel_size=3, strides=1, padding='same', name=name + '_convA')(up_i)
-            up_i = LeakyReLU(alpha=0.2)(up_i)
-            up_i = Conv2D(filters=filters, kernel_size=3, strides=1, padding='same', name=name + '_convB')(up_i)
-            up_i = LeakyReLU(alpha=0.2)(up_i)
+            up_i = KL.Concatenate(name=name + '_concat')(
+                [up_i, concat_with])  # Skip connection
+            up_i = KL.Conv2D(filters=filters, kernel_size=3, strides=1, padding='same', name=name + '_convA')(up_i)
+            up_i = KL.LeakyReLU(alpha=0.2)(up_i)
+            up_i = KL.Conv2D(filters=filters, kernel_size=3, strides=1, padding='same', name=name + '_convB')(up_i)
+            up_i = KL.LeakyReLU(alpha=0.2)(up_i)
             return up_i
 
+        decode_filters = int(base_model_output_shape[-1])
         # Decoder Layers
-        decoder = Conv2D(filters=decode_filters, kernel_size=1, padding='same', input_shape=base_model_output_shape,
-                         name='conv2')(base_model.output)
+        decoder = KL.Conv2D(filters=decode_filters, kernel_size=1, padding='same', input_shape=base_model_output_shape,
+                         name='conv2')(C5)
 
-        decoder = upproject(decoder, int(decode_filters / 2), 'up1', concat_with=C4.output)
-        decoder = upproject(decoder, int(decode_filters / 4), 'up2', concat_with=C3.output)
-        decoder = upproject(decoder, int(decode_filters / 8), 'up3', concat_with=C2.output)
-        decoder = upproject(decoder, int(decode_filters / 16), 'up4', concat_with=C1.output)
+        decoder = upproject(decoder, int(decode_filters / 2), 'up1', concat_with=C4)
+        decoder = upproject(decoder, int(decode_filters / 4), 'up2', concat_with=C3)
+        decoder = upproject(decoder, int(decode_filters / 8), 'up3', concat_with=C2)
+        decoder = upproject(decoder, int(decode_filters / 16), 'up4', concat_with=C0)
 
         # Extract depths (final layer)
-        conv3 = Conv2D(filters=1, kernel_size=3, strides=1, padding='same', name='output_depth')(decoder)
+        conv3 = KL.Conv2D(filters=1, kernel_size=3, strides=1, padding='same', name='output_depth')(decoder)
 
         # Generate proposals
         # Proposals are [batch, N, (y1, x1, y2, x2)] in normalized coordinates
@@ -2057,16 +2051,17 @@ class DepthMaskRCNN():
                 [target_bbox, target_class_ids, mrcnn_bbox])
             mask_loss = KL.Lambda(lambda x: mrcnn_mask_loss_graph(*x), name="mrcnn_mask_loss")(
                 [target_mask, target_class_ids, mrcnn_mask])
-
+            depth_loss = KL.Lambda(lambda x: depth_loss_function(*x), name="depth_loss")(
+                [input_depth, conv3])
             # Model
             inputs = [input_image, input_image_meta,
-                      input_rpn_match, input_rpn_bbox, input_gt_class_ids, input_gt_boxes, input_gt_masks]
+                      input_rpn_match, input_rpn_bbox, input_gt_class_ids, input_gt_boxes, input_gt_masks, input_depth]
             if not config.USE_RPN_ROIS:
                 inputs.append(input_rois)
             outputs = [rpn_class_logits, rpn_class, rpn_bbox,
                        mrcnn_class_logits, mrcnn_class, mrcnn_bbox, mrcnn_mask,
                        rpn_rois, output_rois,
-                       rpn_class_loss, rpn_bbox_loss, class_loss, bbox_loss, mask_loss, conv3]
+                       rpn_class_loss, rpn_bbox_loss, class_loss, bbox_loss, mask_loss, conv3, depth_loss]
             model = KM.Model(inputs, outputs, name='mask_rcnn')
         else:
             # Network Heads
@@ -2091,15 +2086,15 @@ class DepthMaskRCNN():
                                               config.NUM_CLASSES,
                                               train_bn=config.TRAIN_BN)
 
-            model = KM.Model([input_image, input_image_meta, input_anchors],
+            model = KM.Model([input_image, input_image_meta, input_anchors, input_depth],
                              [detections, mrcnn_class, mrcnn_bbox,
                               mrcnn_mask, rpn_rois, rpn_class, rpn_bbox],
                              name='mask_rcnn')
 
         # Add multi-GPU support.
-        if config.GPU_COUNT > 1:
-            from mrcnn.parallel_model import ParallelModel
-            model = ParallelModel(model, config.GPU_COUNT)
+        #if config.GPU_COUNT > 1:
+        #   from mrcnn.parallel_model import ParallelModel
+        #   model = ParallelModel(model, config.GPU_COUNT)
 
         return model
 
@@ -2119,12 +2114,10 @@ class DepthMaskRCNN():
         depth_loss_coef = 1
         mask_rcnn_loss_coef = 1
 
-        depth_loss = depth_loss_function(self.keras_model.get_layer('input_depth'),
-                                         self.keras_model.get_layer('output_depth'))
-
         loss_names = [
             "rpn_class_loss", "rpn_bbox_loss",
-            "mrcnn_class_loss", "mrcnn_bbox_loss", "mrcnn_mask_loss"]
+            "mrcnn_class_loss", "mrcnn_bbox_loss", "mrcnn_mask_loss",
+            "depth_loss"]
         for name in loss_names:
             layer = self.keras_model.get_layer(name)
             if layer.output in self.keras_model.losses:
@@ -2133,7 +2126,6 @@ class DepthMaskRCNN():
                     tf.reduce_mean(layer.output, keepdims=True)
                     * self.config.LOSS_WEIGHTS.get(name, 1.))
             self.keras_model.add_loss(loss)
-        self.keras_model.add_loss(depth_loss)
 
         # Add L2 Regularization
         # Skip gamma and beta weights of batch normalization layers.

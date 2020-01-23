@@ -1,5 +1,11 @@
 import os, sys, glob, time, pathlib, argparse
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '5'
+import imgaug
+
+ROOT_DIR = os.path.abspath("../../")
+
+# Import Mask RCNN
+sys.path.append(ROOT_DIR)
 
 from model import DepthMaskRCNN
 from mrcnn.config import Config
@@ -8,6 +14,27 @@ from data import NyuDataset
 from keras.optimizers import Adam
 from keras.utils import multi_gpu_model
 from keras.utils.vis_utils import plot_model
+
+class CocoConfig(Config):
+    """Configuration for training on MS COCO.
+    Derives from the base Config class and overrides values specific
+    to the COCO dataset.
+    """
+    # Give the configuration a recognizable name
+    NAME = "nyu"
+
+    # We use a GPU with 12GB memory, which can fit two images.
+    # Adjust down if you use a smaller GPU.
+    IMAGES_PER_GPU = 2
+
+    # Uncomment to train on 8 GPUs (default is 1)
+    # GPU_COUNT = 8
+
+    IMAGE_SHAPE = [480, 640, 3]
+
+    # Number of classes (including background)
+    NUM_CLASSES = 1 + 218  # COCO has 80 classes
+    IMAGE_RESIZE_MODE = "none"
 
 if __name__ == '__main__':
     import argparse
@@ -18,18 +45,14 @@ if __name__ == '__main__':
     parser.add_argument("command",
                         metavar="<command>",
                         help="'train' or 'evaluate' on MS COCO")
-    parser.add_argument('--dataset', required=True,
+    parser.add_argument('--dataset', required=False,
                         metavar="/path/to/coco/",
                         help='Directory of the MS-COCO dataset')
-    parser.add_argument('--year', required=False,
-                        default=DEFAULT_DATASET_YEAR,
-                        metavar="<year>",
-                        help='Year of the MS-COCO dataset (2014 or 2017) (default=2014)')
-    parser.add_argument('--model', required=True,
+    parser.add_argument('--model', required=False,
                         metavar="/path/to/weights.h5",
                         help="Path to weights .h5 file or 'coco'")
     parser.add_argument('--logs', required=False,
-                        default=DEFAULT_LOGS_DIR,
+                        default='logs',
                         metavar="/path/to/logs/",
                         help='Logs and checkpoints directory (default=logs/)')
     parser.add_argument('--limit', required=False,
@@ -45,9 +68,6 @@ if __name__ == '__main__':
     print("Command: ", args.command)
     print("Model: ", args.model)
     print("Dataset: ", args.dataset)
-    print("Year: ", args.year)
-    print("Logs: ", args.logs)
-    print("Auto Download: ", args.download)
 
     # Configurations
     if args.command == "train":
@@ -64,23 +84,11 @@ if __name__ == '__main__':
 
     # Create model
     if args.command == "train":
-        model = modellib.MaskRCNN(mode="training", config=config,
+        model = DepthMaskRCNN(mode="training", config=config,
                                   model_dir=args.logs)
     else:
-        model = modellib.MaskRCNN(mode="inference", config=config,
+        model = DepthMaskRCNN(mode="inference", config=config,
                                   model_dir=args.logs)
-
-    # Select weights file to load
-    if args.model.lower() == "coco":
-        model_path = COCO_MODEL_PATH
-    elif args.model.lower() == "last":
-        # Find last trained weights
-        model_path = model.find_last()
-    elif args.model.lower() == "imagenet":
-        # Start from ImageNet trained weights
-        model_path = model.get_imagenet_weights()
-    else:
-        model_path = args.model
 
     # Load weights
     #print("Loading weights ", model_path)
@@ -91,12 +99,12 @@ if __name__ == '__main__':
         # Training dataset. Use the training set and 35K from the
         # validation set, as as in the Mask RCNN paper.
         dataset_train = NyuDataset()
-        dataset_train.load_nyu(nyu, "train",)
+        dataset_train.load_nyu("train",)
         dataset_train.prepare()
 
         # Validation dataset
         dataset_val = NyuDataset()
-        dataset_val.load_nyu(args.dataset, 'test')
+        dataset_val.load_nyu('test')
         dataset_val.prepare()
 
         # Image Augmentation

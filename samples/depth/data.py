@@ -1,12 +1,21 @@
 import numpy as np
+import sys
+import os
+from mrcnn import utils
 from io import BytesIO
 from PIL import Image
+
+
+def nyu_resize(img, resolution=480, padding=6):
+    from skimage.transform import resize
+    return resize(img, (resolution, int(resolution * 4 / 3)), preserve_range=True, mode='reflect', anti_aliasing=True)
 
 
 ROOT_DIR = os.path.abspath("../../")
 
 # Import Mask RCNN
 sys.path.append(ROOT_DIR)
+
 
 #################################################################
 # MaskRCNN Dataset
@@ -33,11 +42,12 @@ class NyuDataset(utils.Dataset):
 
         self.maxDepth = 1000.0
         images = [f for f in os.listdir(os.path.join(dataset_dir, 'images')) \
-                                            if isfile(os.path.join(dataset_dir, 'images', f))]
+                  if os.path.isfile(os.path.join(dataset_dir, 'images', f))]
         for i, image in enumerate(images):
-            self.add_image('nyu', image_id =i, path = os.path.join(dataset_dir, 'images', image),
-                           width = 640, height = 480)
-
+            self.add_image('nyu', image_id=i, path=os.path.join(dataset_dir, 'images', image),
+                           depth_path=os.path.join(dataset_dir, 'depths', image),
+                           label_path=os.path.join(dataset_dir, 'labels', image),
+                           width=640, height=480)
 
     def load_mask(self, image_id):
         """Load instance masks for the given image.
@@ -53,14 +63,14 @@ class NyuDataset(utils.Dataset):
         """
         # If not a COCO image, delegate to parent class.
 
-
         instance_masks = []
         class_ids = []
-        image = np.asarray(Image.open(BytesIO(
-            os.path.join(self.dataset_dir,'labels', str(image_id) + '.jpg')))).reshape(480, 640, 3)
+        image = np.asarray(Image.open(self.image_info[image_id]['label_path'])).reshape(480, 640, 1)
         # Build mask of shape [height, width, instance_count] and list
         # of class IDs that correspond to each channel of the mask.
         for cl in np.unique(image):
+            if cl == 0:
+                continue
             class_id = self.map_source_class_id(
                 "nyu.{}".format(cl))
             if class_id:
@@ -79,8 +89,8 @@ class NyuDataset(utils.Dataset):
             return super(CocoDataset, self).load_mask(image_id)
 
     def load_depth_map(self, image_id):
-        depth = np.clip(np.asarray(Image.open(BytesIO(
-            os.path.join(self.dataset_dir, 'labels', str(image_id) + '.jpg')))) \
+        depth = np.clip(np.asarray(Image.open(self.image_info[image_id]['depth_path'])) \
                         .reshape(480, 640, 1) / 255 * self.maxDepth, 0, self.maxDepth)
-        return depth
+
+        return nyu_resize(np.array(depth), 240)
 
