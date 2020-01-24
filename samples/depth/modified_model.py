@@ -1,33 +1,41 @@
 import os
 import sys
 
+import multiprocessing
 import keras
 import keras.layers as KL
-import keras.model as KM
+import keras.models as KM
+import mrcnn.model as U
 
 ROOT_DIR = os.path.abspath("../../")
 # Import Mask RCNN
 sys.path.append(ROOT_DIR)
 
+from layers import BilinearUpSampling2D
+from loss import depth_loss_function
 from mrcnn.model import MaskRCNN
 from data import data_generator
 
 class ModifiedMaskRCNN(MaskRCNN):
     def __init__(self, mode, config, model_dir):
-        super().__init__(mode, config, model_dir)
-
-        self.base_model = self.keras_model
-        self.keras_model = self.build(mode, config)
+        assert mode in ['training', 'inference']
+        self.mode = mode
+        self.config = config
+        self.model_dir = model_dir
+        self.set_log_dir()
+        self.base_model = super().build(mode, config)
+        self.keras_model = self.build(mode=mode, config=config)
 
     def build(self, mode, config):
         # Depth network part
         # Starting point for decoder
         if mode == 'training':
-            input_depth = KL.Input(shape=[240, 320, 1], name='input_depth')
+            input_depth = KL.Input(shape=[config.IMAGE_SHAPE[0] // 2,
+             config.IMAGE_SHAPE[1] // 2, 1], name='input_depth')
         else:
             print("Not implemented")
             exit(1)
-        base_model_output_shape = self.base_model.get_layer('bn5c_branch2c').shape
+        base_model_output_shape = self.base_model.get_layer('bn5c_branch2c').output.shape
 
         # Define upsampling layer
         def upproject(tensor, filters, name, concat_with):
@@ -54,16 +62,15 @@ class ModifiedMaskRCNN(MaskRCNN):
         conv3 = KL.Conv2D(filters=1, kernel_size=3, strides=1, padding='same', name='output_depth')(decoder)
 
         # getting input and output layers of base model
-        inputs = [l for l in self.base_model.layers if 'input' in l.name]
-        outputs = [l for l in self.base_model.layers if 'output' in l.name]
-
+        inputs = self.base_model.input
+        outputs = self.base_model.output
         if mode == 'training':
             #Depth loss
             depth_loss = KL.Lambda(lambda x: depth_loss_function(*x), name="depth_loss")(
                 [input_depth, conv3])
 
-            inputs.append(input_depth)
-            outputs.append(conv3, depth_loss)
+            inputs.extend([input_depth])
+            outputs.extend([conv3, depth_loss])
         else:
             print("Not implemented")
             exit(1)
@@ -147,8 +154,8 @@ class ModifiedMaskRCNN(MaskRCNN):
             callbacks += custom_callbacks
 
         # Trainf
-        log("\nStarting at epoch {}. LR={}\n".format(self.epoch, learning_rate))
-        log("Checkpoint Path: {}".format(self.checkpoint_path))
+        U.log("\nStarting at epoch {}. LR={}\n".format(self.epoch, learning_rate))
+        U.log("Checkpoint Path: {}".format(self.checkpoint_path))
         self.set_trainable(layers)
         self.compile(learning_rate, self.config.LEARNING_MOMENTUM)
 

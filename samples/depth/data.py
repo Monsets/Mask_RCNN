@@ -2,6 +2,7 @@ import numpy as np
 import sys
 import os
 import mrcnn.model as U
+import logging
 
 from mrcnn import utils
 from io import BytesIO
@@ -49,7 +50,7 @@ class NyuDataset(utils.Dataset):
             self.add_image('nyu', image_id=i, path=os.path.join(dataset_dir, 'images', image),
                            depth_path=os.path.join(dataset_dir, 'depths', image),
                            label_path=os.path.join(dataset_dir, 'labels', image),
-                           width=640, height=480)
+                           width=640, height=512)
 
     def load_mask(self, image_id):
         """Load instance masks for the given image.
@@ -67,7 +68,7 @@ class NyuDataset(utils.Dataset):
 
         instance_masks = []
         class_ids = []
-        image = np.asarray(Image.open(self.image_info[image_id]['label_path'])).reshape(480, 640, 1)
+        image = np.asarray(Image.open(self.image_info[image_id]['label_path'])).reshape(512, 640, 1)
         # Build mask of shape [height, width, instance_count] and list
         # of class IDs that correspond to each channel of the mask.
         for cl in np.unique(image):
@@ -93,10 +94,10 @@ class NyuDataset(utils.Dataset):
             return super(CocoDataset, self).load_mask(image_id)
 
     def load_depth_map(self, image_id):
-        depth = np.clip(np.asarray(Image.open(self.image_info[image_id]['depth_path'])) \
-                        .reshape(480, 640, 1) / 255 * self.maxDepth, 0, self.maxDepth)
+        depth = np.clip(np.asarray(Image.open(self.image_info[image_id]['depth_path']).resize((320, 256))) \
+                        .reshape(256, 320, 1) / 255 * self.maxDepth, 0, self.maxDepth)
 
-        return nyu_resize(np.array(depth), 240)
+        return
 
 
 def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
@@ -134,7 +135,8 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
         min_scale=config.IMAGE_MIN_SCALE,
         max_dim=config.IMAGE_MAX_DIM,
         mode=config.IMAGE_RESIZE_MODE)
- #   mask = utils.resize_mask(mask, scale, padding, crop)
+    print(scale, padding, crop)
+    #mask = utils.resize_mask(mask, scale, padding, crop)
 
     # Random horizontal flips.
     # TODO: will be removed in a future update in favor of augmentation
@@ -184,7 +186,7 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
     # and here is to filter them out
     _idx = np.sum(mask, axis=(0, 1)) > 0
     mask = mask[:, :, _idx]
-    class_ids = class_ids[_idx]
+    #class_ids = class_ids[_idx]
     # Bounding boxes. Note that some boxes might be all zeros
     # if the corresponding mask got cropped out.
     # bbox: [num_instances, (y1, x1, y2, x2)]
@@ -352,7 +354,7 @@ def data_generator(dataset, config, shuffle=True, augment=False, augmentation=No
             batch_image_meta[b] = image_meta
             batch_rpn_match[b] = rpn_match[:, np.newaxis]
             batch_rpn_bbox[b] = rpn_bbox
-            batch_images[b] = mold_image(image.astype(np.float32), config)
+            batch_images[b] = U.mold_image(image.astype(np.float32), config)
             batch_gt_class_ids[b, :gt_class_ids.shape[0]] = gt_class_ids
             batch_gt_boxes[b, :gt_boxes.shape[0]] = gt_boxes
             batch_gt_masks[b, :, :, :gt_masks.shape[-1]] = gt_masks

@@ -9,6 +9,7 @@ sys.path.append(ROOT_DIR)
 
 from modified_model import ModifiedMaskRCNN
 from data import NyuDataset
+from mrcnn.config import Config
 
 from keras.optimizers import Adam
 from keras.utils import multi_gpu_model
@@ -28,11 +29,23 @@ class CocoConfig(Config):
 
     USE_MINI_MASK = False
 
-    IMAGE_SHAPE = [480, 640, 3]
 
     # Number of classes (including background)
     NUM_CLASSES = 1 + 239  # COCO has 80 classes
     IMAGE_RESIZE_MODE = "none"
+    IMAGE_MAX_DIM = 640
+    IMAGE_MIN_DIM = 512
+
+    def __init__(self):
+        """Set values of computed attributes."""
+        # Effective batch size
+        self.BATCH_SIZE = self.IMAGES_PER_GPU * self.GPU_COUNT
+
+        self.IMAGE_SHAPE = [512, 640, 3]
+
+        # Image meta data length
+        # See compose_image_meta() for details
+        self.IMAGE_META_SIZE = 1 + 3 + 3 + 4 + 1 + self.NUM_CLASSES
 
 if __name__ == '__main__':
     import argparse
@@ -108,7 +121,7 @@ if __name__ == '__main__':
         # Image Augmentation
         # Right/Left flip 50% of the time
         augmentation = imgaug.augmenters.Fliplr(0.5)
-
+        augmentation = None
         # *** This training schedule is an example. Update to your needs ***
 
         # Training - Stage 3

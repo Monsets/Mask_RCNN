@@ -463,6 +463,7 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None, mode="square
         # Both sides must be divisible by 64
         assert min_dim % 64 == 0, "Minimum dimension must be a multiple of 64"
         # Height
+        # Height
         if h % 64 > 0:
             max_h = h - (h % 64) + 64
             top_pad = (max_h - h) // 2
@@ -509,6 +510,7 @@ def resize_mask(mask, scale, padding, crop=None):
     if crop is not None:
         y, x, h, w = crop
         mask = mask[y:y + h, x:x + w]
+
     else:
         mask = np.pad(mask, padding, mode='constant', constant_values=0)
     return mask
