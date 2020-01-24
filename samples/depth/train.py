@@ -7,8 +7,7 @@ ROOT_DIR = os.path.abspath("../../")
 # Import Mask RCNN
 sys.path.append(ROOT_DIR)
 
-from model import DepthMaskRCNN
-from mrcnn.config import Config
+from modified_model import ModifiedMaskRCNN
 from data import NyuDataset
 
 from keras.optimizers import Adam
@@ -27,13 +26,12 @@ class CocoConfig(Config):
     # Adjust down if you use a smaller GPU.
     IMAGES_PER_GPU = 2
 
-    # Uncomment to train on 8 GPUs (default is 1)
-    # GPU_COUNT = 8
+    USE_MINI_MASK = False
 
     IMAGE_SHAPE = [480, 640, 3]
 
     # Number of classes (including background)
-    NUM_CLASSES = 1 + 218  # COCO has 80 classes
+    NUM_CLASSES = 1 + 239  # COCO has 80 classes
     IMAGE_RESIZE_MODE = "none"
 
 if __name__ == '__main__':
@@ -84,10 +82,10 @@ if __name__ == '__main__':
 
     # Create model
     if args.command == "train":
-        model = DepthMaskRCNN(mode="training", config=config,
+        model = ModifiedMaskRCNN(mode="training", config=config,
                                   model_dir=args.logs)
     else:
-        model = DepthMaskRCNN(mode="inference", config=config,
+        model = ModifiedMaskRCNN(mode="inference", config=config,
                                   model_dir=args.logs)
 
     # Load weights
@@ -99,7 +97,7 @@ if __name__ == '__main__':
         # Training dataset. Use the training set and 35K from the
         # validation set, as as in the Mask RCNN paper.
         dataset_train = NyuDataset()
-        dataset_train.load_nyu("train",)
+        dataset_train.load_nyu("train")
         dataset_train.prepare()
 
         # Validation dataset
@@ -117,7 +115,7 @@ if __name__ == '__main__':
         # Fine tune all layers
         print("Fine tune all layers")
         model.train(dataset_train, dataset_val,
-                    learning_rate=config.LEARNING_RATE / 10,
+                    learning_rate=config.LEARNING_RATE,
                     epochs=160,
                     layers='all',
                     augmentation=augmentation)
