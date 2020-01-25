@@ -11,6 +11,7 @@ from modified_model import ModifiedMaskRCNN
 from data import NyuDataset
 from mrcnn.config import Config
 
+from utils import download_trained_weights
 from keras.optimizers import Adam
 from keras.utils import multi_gpu_model
 from keras.utils.vis_utils import plot_model
@@ -35,6 +36,7 @@ class CocoConfig(Config):
     IMAGE_RESIZE_MODE = "none"
     IMAGE_MAX_DIM = 640
     IMAGE_MIN_DIM = 512
+    COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
 
     def __init__(self):
         """Set values of computed attributes."""
@@ -92,8 +94,18 @@ if __name__ == '__main__':
         model = ModifiedMaskRCNN(mode="inference", config=config,
                                   model_dir=args.logs)
 
-    if args.model.lower() == "last":
+    if args.model.lower() == "coco":
+        if not os.path.exists(config.COCO_MODEL_PATH):
+            try:
+                download_trained_weights(config.COCO_MODEL_PATH)
+                model_path = config.COCO_MODEL_PATH
+            except:
+                print("Cannot load COCO weights!")
+                model_path = None
+        else:
+            model_path = config.COCO_MODEL_PATH
         # Find last trained weights
+    elif args.model.lower() == "last":
         model_path = model.find_last()
     elif args.model.lower() == "imagenet":
         # Start from ImageNet trained weights
@@ -101,8 +113,9 @@ if __name__ == '__main__':
     else:
         model_path = args.model
 
-    print("Loading weights ", model_path)
-    model.load_weights(model_path, by_name=True)
+    if os.path.exists(model_path):
+        print("Loading weights ", model_path)
+        model.load_weights(model_path, by_name=True)
 
     # Train or evaluate
     if args.command == "train":
