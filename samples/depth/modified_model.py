@@ -5,11 +5,12 @@ import multiprocessing
 import keras
 import keras.layers as KL
 import keras.models as KM
-import mrcnn.model as U
 
 ROOT_DIR = os.path.abspath("../../")
 # Import Mask RCNN
 sys.path.append(ROOT_DIR)
+
+import mrcnn.model as U
 
 from layers import BilinearUpSampling2D
 from loss import depth_loss_function
@@ -180,3 +181,13 @@ class ModifiedMaskRCNN(MaskRCNN):
             use_multiprocessing=True,
         )
         self.epoch = max(self.epoch, epochs)
+
+    def load_weights(self, filepath, by_name=False, exclude=None):
+        try:
+            super().load_weights(filepath, by_name, exclude)
+        except:
+            print("Weights can't be loaded for full model. Loading for base...")
+            full_model_layers = [l.name for l in self.keras_model.layers]
+            base_model_layers = [l.name for l in self.base_model.layers]
+            exclude_layers = [l for l in full_model_layers if l not in base_model_layers]
+            super().load_weights(filepath, by_name, exclude_layers)

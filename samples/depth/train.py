@@ -66,15 +66,6 @@ if __name__ == '__main__':
                         default='logs',
                         metavar="/path/to/logs/",
                         help='Logs and checkpoints directory (default=logs/)')
-    parser.add_argument('--limit', required=False,
-                        default=500,
-                        metavar="<image count>",
-                        help='Images to use for evaluation (default=500)')
-    parser.add_argument('--download', required=False,
-                        default=False,
-                        metavar="<True|False>",
-                        help='Automatically download and unzip MS-COCO files (default=False)',
-                        type=bool)
     args = parser.parse_args()
     print("Command: ", args.command)
     print("Model: ", args.model)
@@ -101,9 +92,17 @@ if __name__ == '__main__':
         model = ModifiedMaskRCNN(mode="inference", config=config,
                                   model_dir=args.logs)
 
-    # Load weights
-    #print("Loading weights ", model_path)
-    #model.load_weights(model_path, by_name=True)
+    if args.model.lower() == "last":
+        # Find last trained weights
+        model_path = model.find_last()
+    elif args.model.lower() == "imagenet":
+        # Start from ImageNet trained weights
+        model_path = model.get_imagenet_weights()
+    else:
+        model_path = args.model
+
+    print("Loading weights ", model_path)
+    model.load_weights(model_path, by_name=True)
 
     # Train or evaluate
     if args.command == "train":

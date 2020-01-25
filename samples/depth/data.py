@@ -97,7 +97,7 @@ class NyuDataset(utils.Dataset):
         depth = np.clip(np.asarray(Image.open(self.image_info[image_id]['depth_path']).resize((320, 256))) \
                         .reshape(256, 320, 1) / 255 * self.maxDepth, 0, self.maxDepth)
 
-        return
+        return depth
 
 
 def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
@@ -135,7 +135,6 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
         min_scale=config.IMAGE_MIN_SCALE,
         max_dim=config.IMAGE_MAX_DIM,
         mode=config.IMAGE_RESIZE_MODE)
-    print(scale, padding, crop)
     #mask = utils.resize_mask(mask, scale, padding, crop)
 
     # Random horizontal flips.
