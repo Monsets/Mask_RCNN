@@ -31,8 +31,8 @@ class ModifiedMaskRCNN(MaskRCNN):
         # Depth network part
         # Starting point for decoder
         if mode == 'training':
-            input_depth = KL.Input(shape=[config.IMAGE_SHAPE[0] // 2,
-             config.IMAGE_SHAPE[1] // 2, 1], name='input_depth')
+            input_depth = KL.Input(shape=[config.IMAGE_SHAPE[0],
+             config.IMAGE_SHAPE[1], 1], name='input_depth')
         else:
             print("Not implemented")
             exit(1)
@@ -58,6 +58,7 @@ class ModifiedMaskRCNN(MaskRCNN):
         decoder = upproject(decoder, int(decode_filters / 4), 'up2', concat_with='bn3d_branch2c')
         decoder = upproject(decoder, int(decode_filters / 8), 'up3', concat_with='bn2c_branch2c')
         decoder = upproject(decoder, int(decode_filters / 16), 'up4', concat_with='conv1')
+        decoder = upproject(decoder, int(decode_filters / 32), 'up4', concat_with='mrcnn_mask')
 
         # Extract depths (final layer)
         conv3 = KL.Conv2D(filters=1, kernel_size=3, strides=1, padding='same', name='output_depth')(decoder)
@@ -127,8 +128,15 @@ class ModifiedMaskRCNN(MaskRCNN):
             # All layers
             "all": ".*",
         }
+
+        layer_names = {
+            'base':[l.name for l in self.base_model.layers]
+        }
+
         if layers in layer_regex.keys():
             layers = layer_regex[layers]
+        if layers in layer_names.keys():
+            layers = layer_names[layers]
 
         # Data generators
         train_generator = data_generator(train_dataset, self.config, shuffle=True,

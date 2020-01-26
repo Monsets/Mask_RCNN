@@ -28,7 +28,7 @@ class CocoConfig(Config):
     # Adjust down if you use a smaller GPU.
     IMAGES_PER_GPU = 1
 
-    USE_MINI_MASK = True
+    USE_MINI_MASK = False
 
 
     # Number of classes (including background)
@@ -135,15 +135,37 @@ if __name__ == '__main__':
         # Image Augmentation
         # Right/Left flip 50% of the time
         augmentation = imgaug.augmenters.Fliplr(0.5)
-        augmentation = None
         # *** This training schedule is an example. Update to your needs ***
+
+        print("Training network heads")
+        model.train(dataset_train, dataset_val,
+                    learning_rate=config.LEARNING_RATE,
+                    epochs=20,
+                    layers='heads',
+                    augmentation=augmentation)
+
+        # Training - Stage 2
+        # Finetune layers from ResNet stage 4 and up
+        print("Fine tune Resnet stage 4 and up")
+        model.train(dataset_train, dataset_val,
+                    learning_rate=config.LEARNING_RATE,
+                    epochs=40,
+                    layers='4+',
+                    augmentation=augmentation)
 
         # Training - Stage 3
         # Fine tune all layers
         print("Fine tune all layers")
         model.train(dataset_train, dataset_val,
-                    learning_rate=config.LEARNING_RATE,
-                    epochs=160,
+                    learning_rate=config.LEARNING_RATE / 10,
+                    epochs=60,
+                    layers='base',
+                    augmentation=augmentation)
+
+        print("Fine tune all layers")
+        model.train(dataset_train, dataset_val,
+                    learning_rate=config.LEARNING_RATE / 10,
+                    epochs=30,
                     layers='all',
                     augmentation=augmentation)
 

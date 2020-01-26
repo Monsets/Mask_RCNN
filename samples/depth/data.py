@@ -94,8 +94,8 @@ class NyuDataset(utils.Dataset):
             return super(CocoDataset, self).load_mask(image_id)
 
     def load_depth_map(self, image_id):
-        depth = np.clip(np.asarray(Image.open(self.image_info[image_id]['depth_path']).resize((320, 256))) \
-                        .reshape(256, 320, 1) / 255 * self.maxDepth, 0, self.maxDepth)
+        depth = np.clip(np.asarray(Image.open(self.image_info[image_id]['depth_path'])) \
+                        .reshape(512,640, 1) / 255 * self.maxDepth, 0, self.maxDepth)
 
         return depth
 
@@ -139,7 +139,7 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
 
     # Random horizontal flips.
     # TODO: will be removed in a future update in favor of augmentation
-    if augment:
+    if augmentation:
         logging.warning("'augment' is deprecated. Use 'augmentation' instead.")
         if random.randint(0, 1):
             image = np.fliplr(image)
@@ -148,7 +148,7 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
 
     # Augmentation
     # This requires the imgaug lib (https://github.com/aleju/imgaug)
-    if augmentation:
+    if False:
         import imgaug
 
         # Augmenters that are safe to apply to masks
@@ -184,8 +184,8 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
     # Note that some boxes might be all zeros if the corresponding mask got cropped out.
     # and here is to filter them out
     #_idx = np.sum(mask, axis=(0, 1)) > 0
-    #mask = mask[:, :, _idx]
-    #class_ids = class_ids[_idx]
+    mask = mask[:, :, _idx]
+    class_ids = class_ids[_idx]
     # Bounding boxes. Note that some boxes might be all zeros
     # if the corresponding mask got cropped out.
     # bbox: [num_instances, (y1, x1, y2, x2)]
