@@ -38,6 +38,8 @@ class CocoConfig(Config):
     IMAGE_MIN_DIM = 512
     COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
 
+    STEPS_PER_EPOCH = 1
+
     def __init__(self):
         """Set values of computed attributes."""
         # Effective batch size
