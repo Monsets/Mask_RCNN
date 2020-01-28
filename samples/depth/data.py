@@ -95,7 +95,7 @@ class NyuDataset(utils.Dataset):
             return super(CocoDataset, self).load_mask(image_id)
 
     def load_depth_map(self, image_id):
-        depth = np.clip(np.asarray(Image.open(self.image_info[image_id]['depth_path'])).resize(320, 256) \
+        depth = np.clip(np.asarray(Image.open(self.image_info[image_id]['depth_path']).resize((320, 256))) \
                         .reshape(256,320, 1) / 255 * self.maxDepth, 0, self.maxDepth)
 
         return depth
