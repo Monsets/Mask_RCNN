@@ -1,6 +1,7 @@
 import os
 import sys
 
+import keras.backend as K
 import multiprocessing
 import keras
 import keras.layers as KL
@@ -17,6 +18,7 @@ from loss import depth_loss_function
 from mrcnn.model import MaskRCNN
 from data import data_generator
 
+
 class ModifiedMaskRCNN(MaskRCNN):
     def __init__(self, mode, config, model_dir):
         assert mode in ['training', 'inference']
@@ -31,8 +33,8 @@ class ModifiedMaskRCNN(MaskRCNN):
         # Depth network part
         # Starting point for decoder
         if mode == 'training':
-            input_depth = KL.Input(shape=[config.IMAGE_SHAPE[0],
-             config.IMAGE_SHAPE[1], 1], name='input_depth')
+            input_depth = KL.Input(shape=[config.IMAGE_SHAPE[0] // 2,
+                                          config.IMAGE_SHAPE[1] // 2, 1], name='input_depth')
         else:
             print("Not implemented")
             exit(1)
@@ -41,8 +43,9 @@ class ModifiedMaskRCNN(MaskRCNN):
         # Define upsampling layer
         def upproject(tensor, filters, name, concat_with):
             up_i = BilinearUpSampling2D((2, 2), name=name + '_upsampling2d')(tensor)
-            up_i = KL.Concatenate(name=name + '_concat')(
-                [up_i, self.base_model.get_layer(concat_with).output])  # Skip connection
+            out = self.base_model.get_layer(concat_with).output
+            up_i = KL.Concatenate(name=name + '_concat')([up_i, out])  # Skip connection
+
             up_i = KL.Conv2D(filters=filters, kernel_size=3, strides=1, padding='same', name=name + '_convA')(up_i)
             up_i = KL.LeakyReLU(alpha=0.2)(up_i)
             up_i = KL.Conv2D(filters=filters, kernel_size=3, strides=1, padding='same', name=name + '_convB')(up_i)
@@ -52,13 +55,13 @@ class ModifiedMaskRCNN(MaskRCNN):
         decode_filters = int(base_model_output_shape[-1])
         # Decoder Layers
         decoder = KL.Conv2D(filters=decode_filters, kernel_size=1, padding='same', input_shape=base_model_output_shape,
-                         name='conv2')(self.base_model.get_layer('bn5c_branch2c').output)
+                            name='conv2')(self.base_model.get_layer('bn5c_branch2c').output)
 
         decoder = upproject(decoder, int(decode_filters / 2), 'up1', concat_with='bn4f_branch2c')
         decoder = upproject(decoder, int(decode_filters / 4), 'up2', concat_with='bn3d_branch2c')
         decoder = upproject(decoder, int(decode_filters / 8), 'up3', concat_with='bn2c_branch2c')
         decoder = upproject(decoder, int(decode_filters / 16), 'up4', concat_with='conv1')
-        decoder = upproject(decoder, int(decode_filters / 32), 'up4', concat_with='mrcnn_mask')
+        #decoder = upproject(decoder, int(decode_filters / 32), 'up5', concat_with='mrcnn_mask')
 
         # Extract depths (final layer)
         conv3 = KL.Conv2D(filters=1, kernel_size=3, strides=1, padding='same', name='output_depth')(decoder)
@@ -67,7 +70,7 @@ class ModifiedMaskRCNN(MaskRCNN):
         inputs = self.base_model.input
         outputs = self.base_model.output
         if mode == 'training':
-            #Depth loss
+            # Depth loss
             depth_loss = KL.Lambda(lambda x: depth_loss_function(*x), name="depth_loss")(
                 [input_depth, conv3])
 
@@ -130,7 +133,7 @@ class ModifiedMaskRCNN(MaskRCNN):
         }
 
         layer_names = {
-            'base':[l.name for l in self.base_model.layers]
+            'base': [l.name for l in self.base_model.layers]
         }
 
         if layers in layer_regex.keys():
